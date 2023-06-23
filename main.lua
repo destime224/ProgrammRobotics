@@ -2,9 +2,7 @@ worldModule = require("world")
 utf8 = require("utf8")
 tool = require("tool")
 
-game = {
-    debugMode = false
-}
+game = {}
 
 local function drawFrame(x, y, w, h, bc, ec)
     love.graphics.setColor(unpack(bc or {0, 0, 0}))
@@ -19,7 +17,13 @@ function love.load(args)
 
     for i, arg in ipairs(args) do
         if arg == "--debug" or arg == "-d" then
-            game.debugMode = true
+
+            game.debug = {
+                worldCenter = false,
+                infoPanel = false,
+                ignoreEdge = false
+            }
+
             print("Debug mode enabled")
         end
     end
@@ -31,16 +35,17 @@ function love.load(args)
 
     _G.fonts = {
         ubuntu = {
-            regular = "fonts/ubuntu/Ubuntu-Regular.ttf",
-            italic = "fonts/ubuntu/Ubuntu-Italic.ttf",
-            bold = "fonts/ubuntu/Ubuntu-Bold.ttf",
-            boldItalic = "fonts/ubuntu/Ubuntu-BoldItalic.ttf"
+            regular = love.graphics.newFont("fonts/ubuntu/Ubuntu-Regular.ttf", 20),
+            italic = love.graphics.newFont("fonts/ubuntu/Ubuntu-Italic.ttf", 20),
+            bold = love.graphics.newFont("fonts/ubuntu/Ubuntu-Bold.ttf", 20),
+            boldItalic = love.graphics.newFont("fonts/ubuntu/Ubuntu-BoldItalic.ttf", 20)
         },
 
         pressStart = {
-            regular = "fonts/pressstart/PressStart2P-Regular.ttf"
+            regular = love.graphics.newFont("fonts/pressstart/PressStart2P-Regular.ttf", 20)
         }
     }
+    fonts.pressStart.regular:setLineHeight(1.4)
 
     love.keyboard.setKeyRepeat(true)
 
@@ -58,12 +63,12 @@ function love.load(args)
             pos = 0,
             letter = 1
         },
+        commandHistory = {},
+        commandHistoryIndex = 0,
         drawOffset = 0,
 
         maxLine = 0.97,
-        minLine = 0.1,
-
-        font = love.graphics.newFont(fonts.ubuntu.regular, 20)
+        minLine = 0.1
     }
 
     -- clear the console text
@@ -106,6 +111,28 @@ function love.load(args)
         self.cursor.letter = math.min(utf8.len(self.text) + 1, math.max(1, self.cursor.letter + offset))
     end
 
+    function game.console:addCommandToHistory()
+        if self.commandHistory[1] ~= self.text then
+            table.insert(self.commandHistory, 1, self.text)
+            self.commandHistoryIndex = 0
+        end
+        if #self.commandHistory > 200 then
+            table.remove(self.commandHistory)
+        end
+    end
+
+    function game.console:getCommandFromHistory(off)
+        if self.commandHistoryIndex + off == 0 then
+            self.commandHistoryIndex = 0
+            self.text = ""
+            self.cursor.letter = 1
+        elseif self.commandHistory[self.commandHistoryIndex + off] ~= nil then
+            self.commandHistoryIndex = self.commandHistoryIndex + off
+            self.text = self.commandHistory[self.commandHistoryIndex]
+            self.cursor.letter = #self.text+1
+        end
+    end
+
     function game.console:getRealTextX()
         return self.x + 4
     end
@@ -128,9 +155,7 @@ function love.load(args)
         wheel = {
             offset = 0,
             speed = 20
-        },
-
-        font = love.graphics.newFont(fonts.ubuntu.regular, 20)
+        }
     }
 
     -- print the text
@@ -144,7 +169,7 @@ function love.load(args)
             xpcall(function() text = text .. tostring(t) .. " " end, function(err) print("Element " .. i .. "can't be string") end)
         end
 
-        local _, wrText = self.font:getWrap(text, self:getRealTextWidth())
+        local _, wrText = fonts.ubuntu.regular:getWrap(text, self:getRealTextWidth())
 
         for _, t in ipairs(wrText) do
             table.insert(self.history, t)
@@ -185,49 +210,86 @@ function love.load(args)
 
     -- get history height in pixels
     function game.output:getHistoryHeight()
-        return self.font:getHeight() * #self.history
+        return fonts.ubuntu.regular:getHeight() * #self.history
     end
-
-    -- interpreter in interpreter.lua
-    game.interpreter = require("interpreter")
 
     game.world = {
         x = 0,
         y = 0,
         width = 0,
         height = 0,
-        worldCenter = false,
+        fps = true,
+
+        cursor = {
+            x = 0,
+            y = 0
+        },
 
         map = nil
     }
 
     function game.world:createMap(w, h)
         local map = worldModule.Map.new(w, h)
-
-        if game.world.map then
-            local camera = game.world.map.camera
-
-            game.world.map = map
-            game.world.map.camera = camera
-        else
-            game.world.map = map
-        end
+        self.map = map
 
         rawset(game.interpreter.env.game, "world", tool.setReadOnly({
             getWidth = function() return map.width end,
             getHeight = function() return map.height end,
             getSeed = function() return map.seed end
         }))
+        rawset(game.interpreter.env.game.world, "base" , self.map.base:getEnvTable())
+        rawset(game.interpreter.env.game.world, "engineer" , self.map.engineer:getEnvTable())
 
-        game.world:addEntity(worldModule.Entity.new(game.world.map.camera.x, game.world.map.camera.y, 0, 1, 1, 1, nil, "engineer"))
+        --self:addEntity(worldModule.Entity.new(self.map.camera.x, self.map.camera.y, 1, 1, 0, 1, nil, "engineer"))
     end
 
     function game.world:addEntity(entity)
-        if game.world.map then
-            table.insert(game.world.map.entities, entity)
-            rawset(game.interpreter.env.game.world, entity.tag, entity:getEnvTable())
+        if self.map then
+            table.insert(self.map.entities, entity)
+            rawset(game.interpreter.env.game.world, #game.interpreter.env.game.world+1, entity:getEnvTable())
         end
     end
+
+    function game.world:addBuild(build, base)
+        base = base or false
+        if self.map then
+            table.insert(self.map.builds, build)
+            rawset(game.interpreter.env.game.world, base and "base" or #game.interpreter.env.game.world+1, build:getEnvTable())
+        end
+    end
+
+    function game.world:getRealCameraX()
+        if self.map then
+            return (self.width / 2) - self.map.camera.x * self:getRealZoom()
+        end
+        return 0
+    end
+
+    function game.world:getRealCameraY()
+        if self.map then
+            return (self.height / 2) - self.map.camera.y * self:getRealZoom()
+        end
+        return 0
+    end
+
+    function game.world:getRealZoom()
+        if self.map then
+            return self.map.camera.zoom * math.min(self.width, self.height) / 900
+        end
+        return 0
+    end
+
+    function game.world:getPositionByCursor()
+        if self.map then
+            return
+                (self.cursor.x - self.width/2) / self:getRealZoom() + self.map.camera.x,
+                (self.cursor.y - self.height/2) / self:getRealZoom() + self.map.camera.y
+        end
+        return 0, 0
+    end
+
+    -- interpreter in interpreter.lua
+    game.interpreter = require("interpreter")
 end
 
 function love.update(dt)
@@ -243,7 +305,7 @@ function love.update(dt)
     game.output.x = wHeight
     game.output.y = 0
     game.output.width = wWidth - wHeight
-    game.output.height = wHeight - game.output.font:getHeight()-10
+    game.output.height = wHeight - fonts.ubuntu.regular:getHeight()-10
 
     game.world.x = 0
     game.world.y = 0
@@ -251,7 +313,7 @@ function love.update(dt)
     game.world.height = wHeight
 
     -- Console updating
-    game.console.cursor.pos = game.console.font:getWidth(game.console.text:sub(1, utf8.offset(game.console.text, game.console.cursor.letter)-1))
+    game.console.cursor.pos = fonts.ubuntu.regular:getWidth(game.console.text:sub(1, utf8.offset(game.console.text, game.console.cursor.letter)-1))
 
     if game.console.cursor.pos - game.console.drawOffset > game.console:getRealTextWidth() * game.console.maxLine then
         game.console.drawOffset = game.console.cursor.pos - game.console:getRealTextWidth() * game.console.maxLine
@@ -259,22 +321,45 @@ function love.update(dt)
         game.console.drawOffset = math.max(0, game.console.cursor.pos - game.console:getRealTextWidth() * game.console.minLine)
     end
 
-    -- Entites
+    -- World updating
     if game.world.map then
+        if game.actived == game.world and tool.checkInRectangle(love.mouse.getX(), love.mouse.getY(), game.world.x, game.world.y, game.world.width, game.world.height) then
+            game.world.cursor.x = love.mouse.getX()
+            game.world.cursor.y = love.mouse.getY()
+        end
+
+        if not game.debug.ignoreEdge then
+            game.world.map.camera.x = math.min(game.world.map.width + 0.5 - game.world.width / 2 / game.world:getRealZoom(), math.max(0.5 + game.world.width / 2 / game.world:getRealZoom(), game.world.map.camera.x))
+            game.world.map.camera.y = math.min(game.world.map.height + 0.5 - game.world.height / 2 / game.world:getRealZoom(), math.max(0.5 + game.world.height / 2 / game.world:getRealZoom(), game.world.map.camera.y))
+        end
+
         for i, entity in pairs(game.world.map.entities) do
-            local dx = entity.walk.x - entity.x
-            local dy = entity.walk.y - entity.y
+            if entity.walk.walkTo then
+                local dx = entity.walk.x - entity.x
+                local dy = entity.walk.y - entity.y
+                local dr = entity.walk.rotate - entity.rotate
 
-            if math.abs(dx) >= entity.speed then
-                entity.x = entity.x + entity.speed * dt * tool.sign(dx)
-            else
-                entity.x = entity.walk.x
-            end
+                if math.abs(dx) >= entity.speed * dt then
+                    entity.x = entity.x + entity.speed * dt * tool.sign(dx)
+                else
+                    entity.x = entity.walk.x
+                end
 
-            if math.abs(dy) >= entity.speed then
-                entity.y = entity.y + entity.speed * dt * tool.sign(dy)
-            else
-                entity.y = entity.walk.y
+                if math.abs(dy) >= entity.speed * dt then
+                    entity.y = entity.y + entity.speed * dt * tool.sign(dy)
+                else
+                    entity.y = entity.walk.y
+                end
+
+                if math.abs(dr) >= entity.rSpeed * dt then
+                    entity.rotate = entity.rotate + entity.rSpeed * dt * tool.sign(dr)
+                else
+                    entity.rotate = entity.walk.rotate
+                end
+
+                if entity.x == entity.walk.x and entity.y == entity.walk.y and entity.rotate == entity.walk.rotate then
+                    entity.walk.walkTo = false
+                end
             end
         end
     end
@@ -283,7 +368,7 @@ end
 function love.draw()
     -- Console drawing
     love.graphics.push('all')
-    love.graphics.setFont(game.console.font)
+    love.graphics.setFont(fonts.ubuntu.regular)
     drawFrame(game.console.x, game.console.y, game.console.width, game.console.height)
 
     love.graphics.setScissor(game.console.x, game.console.y, game.console:getRealTextWidth(), game.console.height)
@@ -311,7 +396,7 @@ function love.draw()
 
     -- Output drawing
     love.graphics.push('all')
-    love.graphics.setFont(game.output.font)
+    love.graphics.setFont(fonts.ubuntu.regular)
     drawFrame(game.output.x, game.output.y, game.output.width, game.output.height)
 
     love.graphics.setScissor(game.output:getRealTextX(), game.output.y, game.output:getRealTextWidth(), game.output.height)
@@ -324,48 +409,84 @@ function love.draw()
     love.graphics.push('all')
     drawFrame(game.world.x, game.world.y, game.world.width, game.world.height, {love.math.colorFromBytes(166, 172, 204)}, {0, 0, 0, 0})
 
-    love.graphics.setColor(love.math.colorFromBytes(15, 14, 38))
     if game.world.map then
         love.graphics.setScissor(game.world.x, game.world.y, game.world.width, game.world.height)
+
+        love.graphics.setColor(love.math.colorFromBytes(15, 14, 38))
         for x, y, e in game.world.map:pairs() do
             if e == 1 then
                 love.graphics.rectangle(
                     "fill",
-                    (x - 0.5) * game.world.map:getRealZoom() + game.world.map:getRealCameraX(),
-                    (y - 0.5) * game.world.map:getRealZoom() + game.world.map:getRealCameraY(),
-                    game.world.map:getRealZoom(),
-                    game.world.map:getRealZoom()
+                    (x - 0.5) * game.world:getRealZoom() + game.world:getRealCameraX(),
+                    (y - 0.5) * game.world:getRealZoom() + game.world:getRealCameraY(),
+                    game.world:getRealZoom(),
+                    game.world:getRealZoom()
                 )
             end
         end
 
+        love.graphics.setColor(1, 1, 1)
         for i, entity in ipairs(game.world.map.entities) do
             love.graphics.draw(
                 entity.sprite,
-                (entity.x - 0.5) * game.world.map:getRealZoom() + game.world.map:getRealCameraX(),
-                (entity.y - 0.5) * game.world.map:getRealZoom() + game.world.map:getRealCameraY(),
-                0,
-                game.world.map:getRealZoom() * entity.width / entity.sprite:getWidth(),
-                game.world.map:getRealZoom() * entity.height / entity.sprite:getHeight()
+                entity.x * game.world:getRealZoom() + game.world:getRealCameraX(),
+                entity.y * game.world:getRealZoom() + game.world:getRealCameraY(),
+                entity.rotate,
+                game.world:getRealZoom() * entity.width / entity.sprite:getWidth(),
+                game.world:getRealZoom() * entity.height / entity.sprite:getHeight(),
+                entity.sprite:getWidth()/2,
+                entity.sprite:getHeight()/2
+            )
+        end
+
+        for i, build in ipairs(game.world.map.builds) do
+            love.graphics.draw(
+                build.sprite,
+                build.x * game.world:getRealZoom() + game.world:getRealCameraX(),
+                build.y * game.world:getRealZoom() + game.world:getRealCameraY(),
+                build.rotate,
+                game.world:getRealZoom() * build.width / build.sprite:getWidth(),
+                game.world:getRealZoom() * build.height / build.sprite:getHeight(),
+                build.sprite:getWidth()/2,
+                build.sprite:getHeight()/2
             )
         end
     end
 
-    if game.world.worldCenter then
+    if game.world.fps then
+        local fps = string.format("fps: " .. tostring(love.timer.getFPS()))
+        love.graphics.setColor(0, 0.8, 0)
+        love.graphics.print(fps, game.world.x + game.world.width - fonts.ubuntu.regular:getWidth(fps) * 0.7, game.world.y)
+    end
+
+    if game.debug.worldCenter then
         love.graphics.setColor(0, 0, 0)
         love.graphics.setPointSize(5)
         love.graphics.points(game.world.x + game.world.width / 2, game.world.y + game.world.height / 2)
+    end
+
+    if game.debug.infoPanel then
+        love.graphics.setColor(1, 1, 1)
+        local cursorPos = {game.world:getPositionByCursor()}
+        love.graphics.print(string.format(
+            "x: %s\ny: %s\ncamera.x: %s\ncamera.y: %s\nzoom: %s\nrealZoom: %s",
+            cursorPos[1],
+            cursorPos[2],
+            game.world.map.camera.x,
+            game.world.map.camera.y,
+            game.world.map.camera.zoom,
+            game.world:getRealZoom()))
     end
     love.graphics.pop()
 end
 
 function love.mousepressed(x, y, button, isTouch, presses)
     -- One of the worse scripts I wrote :)
-    if x > game.console.x and y > game.console.y and x < game.console.x + game.console.width and y < game.console.y + game.console.height then
+    if tool.checkInRectangle(x, y, game.console.x, game.console.y, game.console.width, game.console.height) then
         game.actived = game.console
-    elseif x > game.output.x and y > game.output.y and x < game.output.x + game.output.width and y < game.output.y + game.output.height then
+    elseif tool.checkInRectangle(x, y, game.output.x, game.output.y, game.output.width, game.output.height) then
         game.actived = game.output
-    elseif x > game.world.x and y > game.world.y and x < game.world.x + game.world.width and y < game.world.y + game.world.height then
+    elseif tool.checkInRectangle(x, y, game.world.x, game.world.y, game.world.width, game.world.height) then
         game.actived = game.world
     else
         game.actived = nil
@@ -374,8 +495,8 @@ end
 
 function love.mousemoved(x, y, dx, dy)
     if game.actived == game.world and love.mouse.isDown(1) and game.world.map then
-        game.world.map.camera.x = math.min(game.world.map.width + 0.5 - game.world.width / 2 / game.world.map:getRealZoom(), math.max(0.5 + game.world.width / 2 / game.world.map:getRealZoom(), game.world.map.camera.x - dx / game.world.map:getRealZoom()))
-        game.world.map.camera.y = math.min(game.world.map.height + 0.5 - game.world.height / 2 / game.world.map:getRealZoom(), math.max(0.5 + game.world.height / 2 / game.world.map:getRealZoom(), game.world.map.camera.y - dy / game.world.map:getRealZoom()))
+        game.world.map.camera.x = game.world.map.camera.x - dx / game.world:getRealZoom()
+        game.world.map.camera.y = game.world.map.camera.y - dy / game.world:getRealZoom()
     end
 end
 
@@ -384,8 +505,6 @@ function love.wheelmoved(x, y)
         game.output.wheel.offset = math.min(game.output:getHistoryHeight() - game.output.height + 4, math.max(0, game.output.wheel.offset - y * game.output.wheel.speed))
     elseif game.actived == game.world and game.world.map then
         game.world.map.camera.zoom = math.min(game.world.map.camera.zoomMax, math.max(game.world.map.camera.zoomMin, game.world.map.camera.zoom * 1.25 ^ y))
-        game.world.map.camera.x = math.min(game.world.map.width + 0.5 - game.world.width / 2 / game.world.map:getRealZoom(), math.max(0.5 + game.world.width / 2 / game.world.map:getRealZoom(), game.world.map.camera.x))
-        game.world.map.camera.y = math.min(game.world.map.height + 0.5 - game.world.height / 2 / game.world.map:getRealZoom(), math.max(0.5 + game.world.height / 2 / game.world.map:getRealZoom(), game.world.map.camera.y))
     end
 end
 
@@ -397,9 +516,14 @@ function love.keypressed(key, scancode, isRepeat)
             game.console:moveCursor(-1)
         elseif scancode == "right" then
             game.console:moveCursor(1)
+        elseif scancode == "up" then
+            game.console:getCommandFromHistory(1)
+        elseif scancode == "down" then
+            game.console:getCommandFromHistory(-1)
         elseif scancode == "return" and game.console.text ~= "" then
             game.output:registrateCommand(game.console.text)
             game.interpreter:evalString(game.console.text)
+            game.console:addCommandToHistory()
             game.console:clear()
         elseif scancode == "v" and love.keyboard.isDown("lctrl", "rctrl") then
             game.console:addText(love.system.getClipboardText())
@@ -427,11 +551,7 @@ function love.errorhandler(msg)
     love.audio.stop()
     love.graphics.reset()
 
-    local font = love.graphics.newFont(fonts.pressStart.regular, 14)
-    font:setLineHeight(1.4)
-    local smileFont = love.graphics.newFont(fonts.pressStart.regular, 30)
-
-    love.graphics.setFont(font)
+    local font = love.graphics.setFont(fonts.pressStart.regular)
     love.graphics.setColor(1, 1, 1)
 
     if love.system then
@@ -454,12 +574,9 @@ function love.errorhandler(msg)
         end
 
         love.graphics.clear(0, 0, 0)
-        love.graphics.setFont(font)
-        love.graphics.printf(traceback, wWidth/3, wHeight/7, wWidth-wWidth/3-5)
-        love.graphics.setFont(smileFont)
-        love.graphics.print(":(", wWidth/25, wHeight/3.6, math.rad(90), wHeight/144, wWidth/151, 0, love.graphics.getFont():getHeight())
+        love.graphics.printf(traceback, wWidth*0.1, wHeight*0.1, wWidth-wWidth/3-5, "left", 0, 0.63)
         love.graphics.present()
-        --love.graphics.print(":)", wWidth/5, wHeight/20, 0, 20)
+        --love.graphics.print(":(", wWidth/5, wHeight/20, 0, 20)
 
         love.timer.sleep(0.1)
     end

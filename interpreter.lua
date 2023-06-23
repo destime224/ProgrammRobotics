@@ -1,17 +1,18 @@
 settings = {}
+local _, _, t = love.window.getMode()
 
 settings.fullscreen = {}
-settings.fullscreen[1], _ = love.window.getFullscreen()
+settings.fullscreen[1] = t.fullscreen
 settings.fullscreen[2] = tool.checkTypeBoolean()
 settings.fullscreen[3] = function(v) love.window.setFullscreen(v) end
 
 settings.fullscreenType = {}
-_, settings.fullscreenType[1] = love.window.getFullscreen()
+settings.fullscreenType[1] = t.fullscreentype
 settings.fullscreenType[2] = tool.checkTypeString("desktop", "exclusive", "normal")
 settings.fullscreenType[3] = function(v) love.window.setFullscreen(settings.fullscreen[1], v) end
 
 settings.windowX = {}
-settings.windowX[1], _, _ = love.window.getPosition()
+settings.windowX[1] = t.x
 settings.windowX[2] = tool.checkTypeInteger(0, deskWidth - wWidth)
 settings.windowX[3] = function(v)
     local _, y, _ = love.window.getPosition()
@@ -19,7 +20,7 @@ settings.windowX[3] = function(v)
 end
 
 settings.windowY = {}
-_, settings.windowY[1], _ = love.window.getPosition()
+settings.windowY[1] = t.y
 settings.windowY[2] = tool.checkTypeInteger(0, deskHeight - wHeight)
 settings.windowY[3] = function(v) love.window.setPosition(settings.windowX[1], v) end
 
@@ -34,9 +35,24 @@ settings.windowHeight[2] = tool.checkTypeInteger(720, deskHeight - settings.wind
 settings.windowHeight[3] = function(v) love.window.setMode(wWidth, v) end
 
 settings.VSync = {}
-settings.VSync[1] = love.window.getVSync()
+settings.VSync[1] = t.vsync
 settings.VSync[2] = tool.checkTypeInteger(-1, 1)
 settings.VSync[3] = function(v) love.window.setVSync(v) end
+
+settings.borderless = {}
+settings.borderless[1] = t.borderless
+settings.borderless[2] = tool.checkTypeBoolean()
+settings.borderless[3] = function(v) love.window.setMode(wWidth, wHeight, {borderless = v}) end
+
+settings.resizable = {}
+settings.resizable[1] = t.resizable
+settings.resizable[2] = tool.checkTypeBoolean()
+settings.resizable[3] = function(v) love.window.setMode(wWidth, wHeight, {resizable = v}) end
+
+settings.showFPS = {}
+settings.showFPS[1] = game.world.fps
+settings.showFPS[2] = tool.checkTypeBoolean()
+settings.showFPS[3] = function(v) game.world.fps = v end
 
 local env = tool.setGameSafe({
     assert = assert,
@@ -61,8 +77,14 @@ local env = tool.setGameSafe({
             love.event.quit(0)
         end,
         export = tool.NONE,
-        createWorld = function()
-            game.world:createMap(256, 256)
+        credits = function() game.output:credits() end,
+        createWorld = function(w, h)
+            w = type(w) == "number" and w or 256
+            h = type(h) == "number" and h or 256
+            if w < 128 or w > 1024 or h < 128 or h > 1024 then
+                game.interpreter:sendError("Width and height must be >= 128 and <= 1024")
+            end
+            game.world:createMap(w, h)
             game.output:print("The world (" .. game.world.map.width .. "x" .. game.world.map.height .. ") was successfully created")
         end,
 
@@ -99,7 +121,7 @@ local env = tool.setGameSafe({
     })
 })
 
-if game.debugMode then
+if game.debug then
     rawset(env, "debug", {
         spawnEntity = function(x, y)
             x = x or game.world.map.camera.x
@@ -108,12 +130,22 @@ if game.debugMode then
         end,
 
         setCenterPoint = function(bool)
-            bool = bool or not game.world.worldCenter
-            game.world.worldCenter = bool
+            bool = bool or not game.debug.worldCenter
+            game.debug.worldCenter = bool
         end,
 
         generateError = function(msg)
             error(msg or "simple text")
+        end,
+
+        setIgnoreEdge = function(bool)
+            bool = bool or not game.debug.ignoreEdge
+            game.debug.ignoreEdge = bool
+        end,
+
+        setInfoPanel = function(bool)
+            bool = bool or not game.debug.infoPanel
+            game.debug.infoPanel = bool
         end,
         mainEnv = _G
     })

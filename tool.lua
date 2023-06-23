@@ -1,10 +1,9 @@
 local tool = {}
 
--- Empty function
+-- Empty function.
 tool.NONE = function() end
 
-
--- Checkers
+-- Returns a integer checker.
 function tool.checkTypeInteger(min, max)
     return function(v, f)
         local _, fraction =  math.modf(v)
@@ -28,6 +27,7 @@ function tool.checkTypeInteger(min, max)
     end
 end
 
+-- Returns a boolean checker.
 function tool.checkTypeBoolean()
     return function (v, f)
         if type(v) == "boolean" then
@@ -38,12 +38,13 @@ function tool.checkTypeBoolean()
     end
 end
 
+-- Returns a string checker.
 function tool.checkTypeString(...)
     local strs = {...}
     local formStrs = table.concat(strs, "|")
     return function (v, f)
         if type(v) == "string" then
-            local overlap = false
+            local overlap = #strs == 0
             for _, str in ipairs(strs) do
                 if str == v then
                     overlap = true
@@ -64,7 +65,12 @@ function tool.checkTypeString(...)
     end
 end
 
--- Safe tables for interpreter
+-- Returns boolean if x, y in rectangle.
+function tool.checkInRectangle(x, y, rx, ry, rw, rh)
+    return x > rx and y > ry and x < rx + rw and y < ry + rh
+end
+
+-- Returns the table whose elements can't be overrided.
 function tool.setReadOnly(table)
     local readOnlyMetatable = {
         __metatable = true,
@@ -82,6 +88,7 @@ function tool.setReadOnly(table)
     return setmetatable({}, readOnlyMetatable)
 end
 
+-- Return a table whose element "game" can't be overrided.
 function tool.setGameSafe(table)
     local gameSafeMetatable = {
         __metatable = true,
@@ -103,8 +110,7 @@ function tool.setGameSafe(table)
     return setmetatable({}, gameSafeMetatable)
 end
 
-
--- Copy and deepcopy
+-- Returns a copy of table. Does not copy tables in the table.
 function tool.copyTable(table)
     local otherTable = {}
     for k, v in pairs(table) do
@@ -113,7 +119,8 @@ function tool.copyTable(table)
     return otherTable
 end
 
-function tool.deepCopy(table) --[[NOT safe for tables have themself as element]]
+-- Returns a copy of table. Alose copyes tables in the table.
+function tool.deepCopy(table) --[[NOT safe for tables have themself as element.]]
     local otherTable = {}
     for k, v in pairs(table) do
         if type(v) == "table" then
@@ -122,13 +129,15 @@ function tool.deepCopy(table) --[[NOT safe for tables have themself as element]]
             otherTable[k] = v
         end
     end
+    return otherTable
 end
 
--- math
+-- Returns a hypotenuse of a and b.
 function tool.hypotenuse(a, b)
     return math.sqrt(a^2 + b^2)
 end
 
+-- Returns a sign of number in -1, 0, 1.
 function tool.sign(i)
     if i < 0 then
         return - 1
@@ -137,6 +146,14 @@ function tool.sign(i)
     else
         return 0
     end
+end
+
+-- Returns a value if value <= max and value >= min otherwise max (value >= max) or min (value <= min).
+function tool.clamp(value, max, min)
+    -- hahahahahahah
+    if value > max then return max
+    elseif value < min then return min
+    else return value end
 end
 
 return tool

@@ -1,4 +1,4 @@
-_G.GameV = "0.0.1 alpha"
+_G.GameV = "0.0.2 alpha"
 
 function love.conf(t)
     t.title = "ProgrammRobotics"
