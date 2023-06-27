@@ -1,4 +1,4 @@
-_G.GameV = "0.0.2 alpha"
+_G.GameV = "0.0.3 alpha"
 
 function love.conf(t)
     t.title = "ProgrammRobotics"
@@ -8,7 +8,7 @@ function love.conf(t)
     t.window.fullscreen = false
     t.window.fullscreentype = "desktop"
 
-    t.window.borderless = true
+    t.window.borderless = false
     t.window.resizable = true
 
     t.window.width = 1280
