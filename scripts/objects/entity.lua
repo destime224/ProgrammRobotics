@@ -48,11 +48,14 @@ function Entity:update(dt)
         self.walk.time = nil
     end
 
-    local angle = math.atan2(dy, dx)
-    local cos = dx ~= 0 and math.cos(angle) or 0
-    local sin = dy ~= 0 and math.sin(angle) or 0
+    local angle = nil
+	if dx ~= 0 or dy ~= 0 then	
+		angle = math.atan2(dy, dx)
+	end
+    local cos = angle and math.cos(angle) or 0
+    local sin = angle and math.sin(angle) or 0
 
-    if cos ~= 0 and sin ~= 0 then
+    if angle then
         self.body:setAngle(angle)
     end
 
@@ -106,7 +109,7 @@ end
 
 function Entity:walkTo(x, y, time)
     self.walk.x, self.walk.y = x, y
-    self.walk.time =  (time or 8)
+    self.walk.time = (time or 8)
     self.walk.timePass = 0
 end
 
